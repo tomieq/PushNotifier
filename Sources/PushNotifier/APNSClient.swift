@@ -59,11 +59,13 @@ public final class APNSClient: Sendable {
         _ notification: APNSNotification<Payload>
     ) async throws {
         let token = try await jwtGenerator.token()
+        let encoder = JSONEncoder()
+        let payloadData = try encoder.encode(notification.payload)
+
+        try validate(notification: notification, payloadData: payloadData)
 
         var request = try buildRequest(for: notification, bearerToken: token)
-
-        let encoder = JSONEncoder()
-        request.httpBody = try encoder.encode(notification.payload)
+        request.httpBody = payloadData
 
         let (data, response): (Data, URLResponse)
         do {
@@ -124,6 +126,42 @@ public final class APNSClient: Sendable {
         // URLComponents.url is nil only when the components are malformed;
         // ours are always valid, so the force-unwrap is safe.
         return components.url!
+    }
+
+    private func validate<Payload: APNSNotificationPayload>(
+        notification: APNSNotification<Payload>,
+        payloadData: Data
+    ) throws {
+        guard notification.pushType == .background else {
+            return
+        }
+
+        guard notification.priority == .considerPower else {
+            throw APNSError.invalidNotification(
+                "Background notifications must use priority .considerPower (apns-priority: 5)."
+            )
+        }
+
+        let payloadObject = try JSONSerialization.jsonObject(with: payloadData)
+        let payload = payloadObject as? [String: Any]
+        let aps = payload?["aps"] as? [String: Any]
+
+        guard let contentAvailable = aps?["content-available"] as? NSNumber,
+              contentAvailable.intValue == 1 else {
+            throw APNSError.invalidNotification(
+                "Background notifications must encode aps.content-available = 1."
+            )
+        }
+
+        let hasAlert = aps?["alert"] != nil
+        let hasSound = aps?["sound"] != nil
+        let hasBadge = aps?["badge"] != nil
+
+        guard !hasAlert && !hasSound && !hasBadge else {
+            throw APNSError.invalidNotification(
+                "Background notifications must not include alert, sound, or badge in aps. Use pushType .alert for user-visible notifications."
+            )
+        }
     }
 }
 

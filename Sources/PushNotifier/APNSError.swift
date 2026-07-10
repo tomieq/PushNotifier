@@ -4,6 +4,8 @@ import Foundation
 public enum APNSError: Error, LocalizedError, Sendable {
     /// The PEM private key in ``APNSCredentials`` is invalid or cannot be parsed.
     case invalidPrivateKey(String)
+    /// The notification configuration is invalid for the selected APNs push type.
+    case invalidNotification(String)
     /// APNs returned a non-200 HTTP status code.
     case rejected(statusCode: Int, reason: APNSRejectionReason?)
     /// The HTTP response received was not an `HTTPURLResponse`.
@@ -15,6 +17,8 @@ public enum APNSError: Error, LocalizedError, Sendable {
         switch self {
         case .invalidPrivateKey(let detail):
             return "Invalid APNs private key: \(detail)"
+        case .invalidNotification(let detail):
+            return "Invalid APNs notification: \(detail)"
         case .rejected(let status, let reason):
             let reasonText = reason?.rawValue ?? "unknown"
             return "APNs rejected the notification (HTTP \(status), reason: \(reasonText))"

@@ -89,6 +89,40 @@ let notification = APNSNotification(
 try await client.send(notification)
 ```
 
+For a silent push with custom data, keep `aps` limited to `content-available: 1` and put your app data at the top level:
+
+```swift
+struct SyncPayload: APNSNotificationPayload {
+    struct APS: Encodable {
+        let contentAvailable = 1
+
+        enum CodingKeys: String, CodingKey {
+            case contentAvailable = "content-available"
+        }
+    }
+
+    let aps = APS()
+    let deepLink: String
+    let syncReason: String
+}
+
+let payload = SyncPayload(
+    deepLink: "myapp://home",
+    syncReason: "wallet-updated"
+)
+
+let notification = APNSNotification(
+    deviceToken: deviceToken,
+    payload: payload,
+    pushType: .background,
+    priority: .considerPower
+)
+
+try await client.send(notification)
+```
+
+Silent pushes are subject to Apple delivery heuristics. On the app side, enable the `Remote notifications` background mode and implement `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`. Do not include `alert`, `sound`, or `badge` when using `pushType: .background`; if you need a visible notification, use `pushType: .alert` instead.
+
 ### Notification with collapse ID and expiry
 
 ```swift
