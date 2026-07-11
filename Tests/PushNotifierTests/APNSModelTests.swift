@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import PushNotifier
 
 private let testPrivateKeyPEM = """
@@ -144,6 +147,43 @@ struct APNSPayloadTests {
         let json    = try jsonObject(data)
         let aps     = try #require(json["aps"] as? [String: Any])
         #expect(aps["category"] as? String == "REPLY_ACTION")
+    }
+}
+
+// MARK: - APNSRichNotificationPayload encoding
+
+@Suite("APNSRichNotificationPayload Encoding")
+struct APNSRichNotificationPayloadTests {
+
+    @Test("Encodes image URL with mutable-content enabled")
+    func encodesImageURL() throws {
+        let payload = APNSRichNotificationPayload(
+            alert: APNSAlert(title: "New photo", body: "Tap to view"),
+            sound: .default,
+            imageURL: try #require(URL(string: "https://cdn.example.com/photo.jpg"))
+        )
+        let data = try JSONEncoder().encode(payload)
+        let json = try jsonObject(data)
+        let aps = try #require(json["aps"] as? [String: Any])
+
+        #expect((aps["alert"] as? [String: Any])?["title"] as? String == "New photo")
+        #expect(aps["mutable-content"] as? Int == 1)
+        #expect(aps["sound"] as? String == "default")
+        #expect(json["image-url"] as? String == "https://cdn.example.com/photo.jpg")
+    }
+
+    @Test("Supports a custom image URL key")
+    func supportsCustomImageURLKey() throws {
+        let payload = APNSRichNotificationPayload(
+            alert: APNSAlert(title: "New photo"),
+            imageURL: try #require(URL(string: "https://cdn.example.com/photo.jpg")),
+            imageURLKey: "media-url"
+        )
+        let data = try JSONEncoder().encode(payload)
+        let json = try jsonObject(data)
+
+        #expect(json["image-url"] == nil)
+        #expect(json["media-url"] as? String == "https://cdn.example.com/photo.jpg")
     }
 }
 

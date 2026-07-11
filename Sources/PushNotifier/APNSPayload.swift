@@ -44,7 +44,7 @@ public struct APNSPayload: APNSNotificationPayload {
         case aps
     }
 
-    private struct APS: Encodable {
+    struct APS: Encodable {
         let alert: APNSAlert?
         let badge: Int?
         let sound: APNSSound?
@@ -61,17 +61,20 @@ public struct APNSPayload: APNSNotificationPayload {
         }
     }
 
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: TopLevelKeys.self)
-        let aps = APS(
+    func makeAPS() -> APS {
+        APS(
             alert: alert,
             badge: badge,
             sound: sound,
             contentAvailable: contentAvailable == true ? 1 : nil,
-            mutableContent:   mutableContent   == true ? 1 : nil,
+            mutableContent: mutableContent == true ? 1 : nil,
             category: category,
             threadID: threadID
         )
-        try container.encode(aps, forKey: .aps)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: TopLevelKeys.self)
+        try container.encode(makeAPS(), forKey: .aps)
     }
 }

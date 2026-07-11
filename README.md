@@ -183,6 +183,58 @@ let notification = APNSNotification(deviceToken: deviceToken, payload: payload)
 try await client.send(notification)
 ```
 
+### Rich notification with an image
+
+APNs does not have a standard `aps.image` field. Image notifications on iPhone are implemented as a visible alert with `mutable-content: 1` plus a custom top-level URL field that your app's `UNNotificationServiceExtension` downloads and attaches before display.
+
+`PushNotifier` now includes a convenience payload for that pattern:
+
+```swift
+let payload = APNSRichNotificationPayload(
+        alert: APNSAlert(
+                title: "New photo",
+                body: "Alice sent a picture"
+        ),
+        sound: .default,
+        imageURL: URL(string: "https://cdn.example.com/attachments/photo.jpg")!
+)
+
+let notification = APNSNotification(
+        deviceToken: deviceToken,
+        payload: payload
+)
+
+try await client.send(notification)
+```
+
+That encodes the payload as:
+
+```json
+{
+    "aps": {
+        "alert": {
+            "title": "New photo",
+            "body": "Alice sent a picture"
+        },
+        "sound": "default",
+        "mutable-content": 1
+    },
+    "image-url": "https://cdn.example.com/attachments/photo.jpg"
+}
+```
+
+If your Notification Service Extension expects a different top-level key, set `imageURLKey`:
+
+```swift
+let payload = APNSRichNotificationPayload(
+        alert: APNSAlert(title: "New photo"),
+        imageURL: imageURL,
+        imageURLKey: "media-url"
+)
+```
+
+Your app must still implement a `UNNotificationServiceExtension`; APNs only transports the URL and does not download or render the image by itself.
+
 ## Error handling
 
 ```swift
@@ -246,6 +298,18 @@ Certificate-based authentication (`.p12`) is not supported.
 | `mutableContent` | `Bool?` | `true` to allow a Notification Service Extension to modify the payload. |
 | `category` | `String?` | Action category identifier. |
 | `threadID` | `String?` | Thread identifier for grouping notifications. |
+
+### `APNSRichNotificationPayload`
+| Parameter | Type | Description |
+|---|---|---|
+| `alert` | `APNSAlert` | The visible alert shown to the user. |
+| `badge` | `Int?` | Badge count. Pass `0` to clear. |
+| `sound` | `APNSSound?` | `.default` or `.named("filename")`. |
+| `category` | `String?` | Action category identifier. |
+| `threadID` | `String?` | Thread identifier for grouping notifications. |
+| `contentAvailable` | `Bool?` | Optional background wake-up flag to combine with the visible notification. |
+| `imageURL` | `URL` | Remote image URL for your Notification Service Extension to download. |
+| `imageURLKey` | `String` | Custom top-level payload key used to encode the image URL. Default: `"image-url"`. |
 
 ### `APNSNotification`
 | Parameter | Type | Description |
