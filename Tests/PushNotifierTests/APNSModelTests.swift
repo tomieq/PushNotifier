@@ -2,6 +2,14 @@ import Testing
 import Foundation
 @testable import PushNotifier
 
+private let testPrivateKeyPEM = """
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg4Lfxvx8t94Kum1vM
+Ar5fRzAzgPWv3K6v1o+BdY9a6nOhRANCAATjiKeg7XWmc1CRkH+ad+vdrNgPpBxh
+wpk8+sXvB0GrVbKUPy7uUZMcyBj8KAZakmDO1W96T4vSz2VgZCUUWQK8
+-----END PRIVATE KEY-----
+"""
+
 // MARK: - APNSAlert encoding
 
 @Suite("APNSAlert Encoding")
@@ -209,4 +217,122 @@ struct APNSRejectionReasonTests {
 private func jsonObject(_ data: Data) throws -> [String: Any] {
     let obj = try JSONSerialization.jsonObject(with: data)
     return try #require(obj as? [String: Any])
+}
+
+// MARK: - Background notification validation
+
+@Suite("Background Notification Validation")
+struct BackgroundNotificationValidationTests {
+
+    @Test("Background push requires content-available")
+    func backgroundPushRequiresContentAvailable() async {
+        let client = makeClient()
+
+        struct Payload: APNSNotificationPayload {
+            struct APS: Encodable {
+                let badge: Int
+            }
+
+            let aps: APS
+            let deepLink: String
+        }
+
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            payload: Payload(aps: .init(badge: 0), deepLink: "myapp://home"),
+            pushType: .background,
+            priority: .considerPower
+        )
+
+        do {
+            try await client.send(notification)
+            Issue.record("Expected invalid background notification error")
+        } catch APNSError.invalidNotification(let message) {
+            #expect(message == "Background notifications must encode aps.content-available = 1.")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Background push rejects alert payloads")
+    func backgroundPushRejectsAlertPayloads() async {
+        let client = makeClient()
+
+        let payload = APNSPayload(
+            alert: APNSAlert(title: "Welcome", body: "Tap to open"),
+            badge: 0,
+            contentAvailable: true
+        )
+
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            payload: payload,
+            pushType: .background,
+            priority: .considerPower
+        )
+
+        do {
+            try await client.send(notification)
+            Issue.record("Expected invalid background notification error")
+        } catch APNSError.invalidNotification(let message) {
+            #expect(message == "Background notifications must not include alert, sound, or badge in aps. Use pushType .alert for user-visible notifications.")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Background push requires priority 5")
+    func backgroundPushRequiresPriorityFive() async {
+        let client = makeClient()
+
+        let payload = APNSPayload(contentAvailable: true)
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            payload: payload,
+            pushType: .background,
+            priority: .immediately
+        )
+
+        do {
+            try await client.send(notification)
+            Issue.record("Expected invalid background notification error")
+        } catch APNSError.invalidNotification(let message) {
+            #expect(message == "Background notifications must use priority .considerPower (apns-priority: 5).")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    private func makeClient() -> APNSClient {
+        let credentials = APNSCredentials(
+            keyID: "KEYID12345",
+            teamID: "TEAM12345",
+            privateKeyPEM: testPrivateKeyPEM
+        )
+        let configuration = APNSConfiguration(
+            credentials: credentials,
+            topic: "com.example.MyApp",
+            environment: .sandbox
+        )
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.protocolClasses = [UnexpectedNetworkURLProtocol.self]
+        let session = URLSession(configuration: sessionConfig)
+        return APNSClient(configuration: configuration, session: session)
+    }
+}
+
+private final class UnexpectedNetworkURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+    }
+
+    override func stopLoading() {}
 }
