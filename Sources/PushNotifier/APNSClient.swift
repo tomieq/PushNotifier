@@ -22,9 +22,16 @@ import FoundationNetworking
 /// )
 /// let client = APNSClient(configuration: config)
 ///
-/// let alert   = APNSAlert(title: "Hello", body: "World")
-/// let payload = APNSPayload(alert: alert, badge: 1, sound: .default)
-/// let note    = APNSNotification(deviceToken: deviceToken, payload: payload)
+/// let note = APNSNotification(
+///     deviceToken: deviceToken,
+///     content: .userInterface(
+///         APNSUserNotification(
+///             alert: APNSAlert(title: "Hello", body: "World"),
+///             badge: 1,
+///             sound: .default
+///         )
+///     )
+/// )
 ///
 /// try await client.send(note)
 /// ```
@@ -55,12 +62,11 @@ public final class APNSClient: Sendable {
     /// - Parameter notification: The notification to send.
     /// - Throws: ``APNSError`` if the token cannot be signed, the request
     ///   fails at the network layer, or APNs rejects the notification.
-    public func send<Payload: APNSNotificationPayload>(
-        _ notification: APNSNotification<Payload>
+    public func send(
+        _ notification: APNSNotification
     ) async throws {
         let token = try await jwtGenerator.token()
-        let encoder = JSONEncoder()
-        let payloadData = try encoder.encode(notification.payload)
+        let payloadData = try payloadData(for: notification)
 
         try validate(notification: notification, payloadData: payloadData)
 
@@ -87,8 +93,8 @@ public final class APNSClient: Sendable {
 
     // MARK: - Private helpers
 
-    private func buildRequest<Payload: APNSNotificationPayload>(
-        for notification: APNSNotification<Payload>,
+    private func buildRequest(
+        for notification: APNSNotification,
         bearerToken: String
     ) throws -> URLRequest {
         let url = apnsURL(deviceToken: notification.deviceToken)
@@ -128,8 +134,8 @@ public final class APNSClient: Sendable {
         return components.url!
     }
 
-    private func validate<Payload: APNSNotificationPayload>(
-        notification: APNSNotification<Payload>,
+    private func validate(
+        notification: APNSNotification,
         payloadData: Data
     ) throws {
         guard notification.pushType == .background else {
@@ -162,6 +168,89 @@ public final class APNSClient: Sendable {
                 "Background notifications must not include alert, sound, or badge in aps. Use pushType .alert for user-visible notifications."
             )
         }
+    }
+
+    func payloadData(
+        for notification: APNSNotification
+    ) throws -> Data {
+        var payload = try topLevelJSONObject(from: notification.customData)
+
+        guard payload["aps"] == nil else {
+            throw APNSError.invalidNotification(
+                "Custom data must not encode the reserved top-level key \"aps\"."
+            )
+        }
+
+        switch notification.content {
+        case .background:
+            payload["aps"] = ["content-available": 1]
+
+        case .userInterface(let userNotification):
+            var aps: [String: Any] = [:]
+
+            if let alert = userNotification.alert {
+                let alertObject = try jsonValue(from: alert)
+                guard let alertPayload = alertObject as? [String: Any] else {
+                    throw APNSError.invalidNotification("Alert must encode to a JSON object.")
+                }
+                aps["alert"] = alertPayload
+            }
+            if let badge = userNotification.badge {
+                aps["badge"] = badge
+            }
+            if let sound = userNotification.sound {
+                aps["sound"] = try jsonValue(from: sound)
+            }
+            if userNotification.contentAvailable == true {
+                aps["content-available"] = 1
+            }
+            if userNotification.mutableContent || userNotification.imageURL != nil {
+                aps["mutable-content"] = 1
+            }
+            if let category = userNotification.category {
+                aps["category"] = category
+            }
+            if let threadID = userNotification.threadID {
+                aps["thread-id"] = threadID
+            }
+            if let imageURL = userNotification.imageURL {
+                guard !userNotification.imageURLKey.isEmpty else {
+                    throw APNSError.invalidNotification("imageURLKey must not be empty.")
+                }
+                guard userNotification.imageURLKey != "aps" else {
+                    throw APNSError.invalidNotification(
+                        "imageURLKey must not use the reserved top-level key \"aps\"."
+                    )
+                }
+                guard payload[userNotification.imageURLKey] == nil else {
+                    throw APNSError.invalidNotification(
+                        "Custom data already encodes the top-level key \"\(userNotification.imageURLKey)\"."
+                    )
+                }
+                payload[userNotification.imageURLKey] = imageURL.absoluteString
+            }
+
+            payload["aps"] = aps
+        }
+
+        return try JSONSerialization.data(withJSONObject: payload)
+    }
+}
+
+private extension APNSClient {
+    func topLevelJSONObject<T: Encodable>(from value: T) throws -> [String: Any] {
+        let object = try jsonValue(from: value)
+        guard let dictionary = object as? [String: Any] else {
+            throw APNSError.invalidNotification(
+                "Custom data must encode to a top-level JSON object."
+            )
+        }
+        return dictionary
+    }
+
+    func jsonValue<T: Encodable>(from value: T) throws -> Any {
+        let data = try JSONEncoder().encode(value)
+        return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }
 }
 

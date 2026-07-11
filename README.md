@@ -60,15 +60,25 @@ let client = APNSClient(configuration: configuration)
 
 ## Sending a notification
 
-### Simple alert
+Choose the notification content you want to send:
+
+- `.background(...)` for silent pushes that wake the app and forward custom JSON to the device.
+- `.userInterface(...)` for visible notifications with alerts, badges, sounds, categories, thread IDs, and optional remote images.
+
+The library always creates the `aps` dictionary for you. Custom data is encoded only as top-level keys next to `aps`.
+
+### User-visible notification
 
 ```swift
-let alert   = APNSAlert(title: "New message", body: "You have a new message.")
-let payload = APNSPayload(alert: alert, badge: 1, sound: .default)
-
 let notification = APNSNotification(
     deviceToken: "a4b8c2d1...",  // hex device token from the device
-    payload:     payload
+    content: .userInterface(
+        APNSUserNotification(
+            alert: APNSAlert(title: "New message", body: "You have a new message."),
+            badge: 1,
+            sound: .default
+        )
+    )
 )
 
 try await client.send(notification)
@@ -77,60 +87,38 @@ try await client.send(notification)
 ### Background (silent) notification
 
 ```swift
-let payload = APNSPayload(contentAvailable: true)
-
-let notification = APNSNotification(
-    deviceToken: deviceToken,
-    payload:     payload,
-    pushType:    .background,
-    priority:    .considerPower
-)
-
-try await client.send(notification)
-```
-
-For a silent push with custom data, keep `aps` limited to `content-available: 1` and put your app data at the top level:
-
-```swift
-struct SyncPayload: APNSNotificationPayload {
-    struct APS: Encodable {
-        let contentAvailable = 1
-
-        enum CodingKeys: String, CodingKey {
-            case contentAvailable = "content-available"
-        }
-    }
-
-    let aps = APS()
+struct SyncData: Encodable, Sendable {
     let deepLink: String
     let syncReason: String
 }
 
-let payload = SyncPayload(
-    deepLink: "myapp://home",
-    syncReason: "wallet-updated"
-)
-
 let notification = APNSNotification(
     deviceToken: deviceToken,
-    payload: payload,
-    pushType: .background,
-    priority: .considerPower
+    content: .background(
+        APNSBackgroundNotification(
+            customData: SyncData(
+                deepLink: "myapp://home",
+                syncReason: "wallet-updated"
+            )
+        )
+    )
 )
 
 try await client.send(notification)
 ```
 
-Silent pushes are subject to Apple delivery heuristics. On the app side, enable the `Remote notifications` background mode and implement `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`. Do not include `alert`, `sound`, or `badge` when using `pushType: .background`; if you need a visible notification, use `pushType: .alert` instead.
+Background notifications always send `aps.content-available = 1` and use APNs priority `5`. Silent pushes are still subject to Apple delivery heuristics. On the app side, enable the `Remote notifications` background mode and implement `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`.
 
 ### Notification with collapse ID and expiry
 
 ```swift
-let payload = APNSPayload(alert: APNSAlert(title: "Score update", body: "Team A 3 – 1 Team B"))
-
 let notification = APNSNotification(
     deviceToken: deviceToken,
-    payload:     payload,
+    content: .userInterface(
+        APNSUserNotification(
+            alert: APNSAlert(title: "Score update", body: "Team A 3 – 1 Team B")
+        )
+    ),
     expiration:  Date(timeIntervalSinceNow: 3600),  // discard after 1 hour
     collapseID:  "score-update"                     // replaces earlier notification with the same ID
 )
@@ -150,36 +138,41 @@ let alert = APNSAlert(
 
 let notification = APNSNotification(
     deviceToken: deviceToken,
-    payload:     APNSPayload(alert: alert, sound: .named("chime"))
+    content: .userInterface(
+        APNSUserNotification(
+            alert: alert,
+            sound: .named("chime")
+        )
+    )
 )
 
 try await client.send(notification)
 ```
 
-### Custom payload
+### User-visible notification with custom top-level data
 
-For notifications that need extra keys alongside `aps`, conform your own type to `APNSNotificationPayload`:
+For notifications that need extra keys alongside `aps`, pass an `Encodable` value as `customData`:
 
 ```swift
-struct MyPayload: APNSNotificationPayload {
-    struct Alert: Encodable {
-        let title: String
-        let body: String
-    }
-    struct APS: Encodable {
-        let alert: Alert
-        let badge: Int
-    }
-    let aps:      APS
-    let deepLink: String  // custom top-level key
+struct NotificationData: Encodable, Sendable {
+    let deepLink: String
+    let conversationID: String
 }
 
-let payload = MyPayload(
-    aps:      .init(alert: .init(title: "Welcome", body: "Tap to open"), badge: 0),
-    deepLink: "myapp://home"
+let notification = APNSNotification(
+    deviceToken: deviceToken,
+    content: .userInterface(
+        APNSUserNotification(
+            alert: APNSAlert(title: "Welcome", body: "Tap to open"),
+            badge: 0,
+            customData: NotificationData(
+                deepLink: "myapp://home",
+                conversationID: "conversation-123"
+            )
+        )
+    )
 )
 
-let notification = APNSNotification(deviceToken: deviceToken, payload: payload)
 try await client.send(notification)
 ```
 
@@ -187,21 +180,21 @@ try await client.send(notification)
 
 APNs does not have a standard `aps.image` field. Image notifications on iPhone are implemented as a visible alert with `mutable-content: 1` plus a custom top-level URL field that your app's `UNNotificationServiceExtension` downloads and attaches before display.
 
-`PushNotifier` now includes a convenience payload for that pattern:
+`PushNotifier` handles that pattern through `APNSUserNotification`:
 
 ```swift
-let payload = APNSRichNotificationPayload(
-        alert: APNSAlert(
-                title: "New photo",
-                body: "Alice sent a picture"
-        ),
-        sound: .default,
-        imageURL: URL(string: "https://cdn.example.com/attachments/photo.jpg")!
-)
-
 let notification = APNSNotification(
         deviceToken: deviceToken,
-        payload: payload
+    content: .userInterface(
+        APNSUserNotification(
+            alert: APNSAlert(
+                title: "New photo",
+                body: "Alice sent a picture"
+            ),
+            sound: .default,
+            imageURL: URL(string: "https://cdn.example.com/attachments/photo.jpg")!
+        )
+    )
 )
 
 try await client.send(notification)
@@ -226,10 +219,15 @@ That encodes the payload as:
 If your Notification Service Extension expects a different top-level key, set `imageURLKey`:
 
 ```swift
-let payload = APNSRichNotificationPayload(
-        alert: APNSAlert(title: "New photo"),
-        imageURL: imageURL,
-        imageURLKey: "media-url"
+let notification = APNSNotification(
+    deviceToken: deviceToken,
+    content: .userInterface(
+        APNSUserNotification(
+            alert: APNSAlert(title: "New photo"),
+            imageURL: imageURL,
+            imageURLKey: "media-url"
+        )
+    )
 )
 ```
 
@@ -288,36 +286,41 @@ Certificate-based authentication (`.p12`) is not supported.
 | `topic` | `String` | App bundle identifier sent as `apns-topic`. |
 | `environment` | `APNSEnvironment` | `.sandbox` or `.production`. Default: `.production`. |
 
-### `APNSPayload`
+### `APNSNotificationContent`
+| Parameter | Type | Description |
+|---|---|---|
+| `.background(APNSBackgroundNotification)` | Case | Silent push that wakes the app and forwards custom top-level JSON. |
+| `.userInterface(APNSUserNotification)` | Case | Visible notification with alert, badge, sound, category, thread ID, custom data, and optional image URL. |
+
+### `APNSBackgroundNotification`
+| Parameter | Type | Description |
+|---|---|---|
+| `customData` | Any `Encodable & Sendable` object | Custom top-level JSON forwarded to the app alongside `aps.content-available = 1`. |
+
+### `APNSUserNotification`
 | Parameter | Type | Description |
 |---|---|---|
 | `alert` | `APNSAlert?` | The visible alert. |
 | `badge` | `Int?` | Badge count. Pass `0` to clear. |
 | `sound` | `APNSSound?` | `.default` or `.named("filename")`. |
-| `contentAvailable` | `Bool?` | `true` for silent background notifications. |
-| `mutableContent` | `Bool?` | `true` to allow a Notification Service Extension to modify the payload. |
+| `contentAvailable` | `Bool?` | Optional background wake-up flag to combine with the visible notification. |
+| `mutableContent` | `Bool` | Set `true` to allow a Notification Service Extension to modify the payload. Automatically enabled when `imageURL` is set. |
 | `category` | `String?` | Action category identifier. |
 | `threadID` | `String?` | Thread identifier for grouping notifications. |
+| `imageURL` | `URL?` | Remote image URL for your Notification Service Extension to download. |
+| `imageURLKey` | `String` | Top-level payload key used to encode the image URL. Default: `"image-url"`. |
+| `customData` | Any `Encodable & Sendable` object | Custom top-level JSON encoded alongside `aps`. |
 
-### `APNSRichNotificationPayload`
+### `APNSEmptyPayload`
 | Parameter | Type | Description |
 |---|---|---|
-| `alert` | `APNSAlert` | The visible alert shown to the user. |
-| `badge` | `Int?` | Badge count. Pass `0` to clear. |
-| `sound` | `APNSSound?` | `.default` or `.named("filename")`. |
-| `category` | `String?` | Action category identifier. |
-| `threadID` | `String?` | Thread identifier for grouping notifications. |
-| `contentAvailable` | `Bool?` | Optional background wake-up flag to combine with the visible notification. |
-| `imageURL` | `URL` | Remote image URL for your Notification Service Extension to download. |
-| `imageURLKey` | `String` | Custom top-level payload key used to encode the image URL. Default: `"image-url"`. |
+| none | n/a | Default custom payload type when no top-level custom fields are needed. |
 
 ### `APNSNotification`
 | Parameter | Type | Description |
 |---|---|---|
 | `deviceToken` | `String` | Hex-encoded device token. |
-| `payload` | `Payload` | Any type conforming to `APNSNotificationPayload`. |
-| `pushType` | `APNSPushType` | `.alert`, `.background`, `.voip`, etc. Default: `.alert`. |
-| `priority` | `APNSPriority` | `.immediately` (10) or `.considerPower` (5). Default: `.immediately`. |
+| `content` | `APNSNotificationContent` | Choose `.background(...)` or `.userInterface(...)`. |
 | `expiration` | `Date?` | Discard date. `nil` keeps the notification for up to 30 days. |
 | `collapseID` | `String?` | Coalescing key to replace earlier notifications. |
 | `apnsID` | `UUID?` | Canonical notification identifier. APNs generates one if `nil`. |

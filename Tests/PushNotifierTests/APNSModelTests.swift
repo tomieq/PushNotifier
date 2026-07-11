@@ -79,90 +79,86 @@ struct APNSSoundTests {
     }
 }
 
-// MARK: - APNSPayload encoding
+// MARK: - APNSNotification payload encoding
 
-@Suite("APNSPayload Encoding")
-struct APNSPayloadTests {
+@Suite("APNSNotification Payload Encoding")
+struct APNSNotificationPayloadEncodingTests {
 
-    @Test("Wraps all fields inside the aps key")
-    func wrapsInsideAPS() throws {
-        let alert   = APNSAlert(title: "Hi", body: "There")
-        let payload = APNSPayload(alert: alert, badge: 3, sound: .default)
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
+    @Test("Background notifications encode custom data with content-available")
+    func backgroundPayloadEncoding() throws {
+        let client = makeClient()
 
+        struct CustomData: Encodable, Sendable {
+            let deepLink: String
+            let syncReason: String
+        }
+
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .background(
+                APNSBackgroundNotification(
+                    customData: CustomData(
+                        deepLink: "myapp://home",
+                        syncReason: "wallet-updated"
+                    )
+                )
+            )
+        )
+
+        let data = try client.payloadData(for: notification)
+        let json = try jsonObject(data)
         let aps = try #require(json["aps"] as? [String: Any])
-        #expect((aps["alert"] as? [String: Any])?["title"] as? String == "Hi")
-        #expect((aps["alert"] as? [String: Any])?["body"]  as? String == "There")
-        #expect(aps["badge"]  as? Int    == 3)
-        #expect(aps["sound"]  as? String == "default")
-    }
 
-    @Test("contentAvailable encodes as integer 1")
-    func contentAvailableIsInt() throws {
-        let payload = APNSPayload(contentAvailable: true)
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
-        let aps     = try #require(json["aps"] as? [String: Any])
         #expect(aps["content-available"] as? Int == 1)
+        #expect(json["deepLink"] as? String == "myapp://home")
+        #expect(json["syncReason"] as? String == "wallet-updated")
     }
 
-    @Test("mutableContent encodes as integer 1")
-    func mutableContentIsInt() throws {
-        let payload = APNSPayload(mutableContent: true)
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
-        let aps     = try #require(json["aps"] as? [String: Any])
-        #expect(aps["mutable-content"] as? Int == 1)
-    }
+    @Test("User interface notifications encode aps fields")
+    func userInterfacePayloadEncoding() throws {
+        let client = makeClient()
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .userInterface(
+                APNSUserNotification(
+                    alert: APNSAlert(title: "Hi", body: "There"),
+                    badge: 3,
+                    sound: .default,
+                    contentAvailable: true,
+                    category: "REPLY_ACTION",
+                    threadID: "conversation-1"
+                )
+            )
+        )
 
-    @Test("Nil optional fields are omitted from JSON")
-    func nilFieldsOmitted() throws {
-        let payload = APNSPayload(alert: APNSAlert(title: "X"))
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
-        let aps     = try #require(json["aps"] as? [String: Any])
+        let data = try client.payloadData(for: notification)
+        let json = try jsonObject(data)
+        let aps = try #require(json["aps"] as? [String: Any])
 
-        #expect(aps["badge"]             == nil)
-        #expect(aps["sound"]             == nil)
-        #expect(aps["content-available"] == nil)
-        #expect(aps["mutable-content"]   == nil)
-        #expect(aps["category"]          == nil)
-        #expect(aps["thread-id"]         == nil)
-    }
-
-    @Test("threadID uses thread-id APNs key")
-    func threadIDKey() throws {
-        let payload = APNSPayload(threadID: "conversation-1")
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
-        let aps     = try #require(json["aps"] as? [String: Any])
+        #expect((aps["alert"] as? [String: Any])?["title"] as? String == "Hi")
+        #expect((aps["alert"] as? [String: Any])?["body"] as? String == "There")
+        #expect(aps["badge"] as? Int == 3)
+        #expect(aps["sound"] as? String == "default")
+        #expect(aps["content-available"] as? Int == 1)
+        #expect(aps["category"] as? String == "REPLY_ACTION")
         #expect(aps["thread-id"] as? String == "conversation-1")
     }
 
-    @Test("category field is encoded")
-    func categoryEncoded() throws {
-        let payload = APNSPayload(category: "REPLY_ACTION")
-        let data    = try JSONEncoder().encode(payload)
-        let json    = try jsonObject(data)
-        let aps     = try #require(json["aps"] as? [String: Any])
-        #expect(aps["category"] as? String == "REPLY_ACTION")
-    }
-}
-
-// MARK: - APNSRichNotificationPayload encoding
-
-@Suite("APNSRichNotificationPayload Encoding")
-struct APNSRichNotificationPayloadTests {
-
-    @Test("Encodes image URL with mutable-content enabled")
-    func encodesImageURL() throws {
-        let payload = APNSRichNotificationPayload(
-            alert: APNSAlert(title: "New photo", body: "Tap to view"),
-            sound: .default,
-            imageURL: try #require(URL(string: "https://cdn.example.com/photo.jpg"))
+    @Test("Rich notifications encode image URL and mutable-content")
+    func richNotificationEncoding() throws {
+        let client = makeClient()
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .userInterface(
+                APNSUserNotification(
+                    alert: APNSAlert(title: "New photo", body: "Tap to view"),
+                    sound: .default,
+                    imageURL: URL(string: "https://cdn.example.com/photo.jpg")
+                )
+            )
         )
-        let data = try JSONEncoder().encode(payload)
+
+        let data = try client.payloadData(for: notification)
         let json = try jsonObject(data)
         let aps = try #require(json["aps"] as? [String: Any])
 
@@ -172,18 +168,32 @@ struct APNSRichNotificationPayloadTests {
         #expect(json["image-url"] as? String == "https://cdn.example.com/photo.jpg")
     }
 
-    @Test("Supports a custom image URL key")
-    func supportsCustomImageURLKey() throws {
-        let payload = APNSRichNotificationPayload(
-            alert: APNSAlert(title: "New photo"),
-            imageURL: try #require(URL(string: "https://cdn.example.com/photo.jpg")),
-            imageURLKey: "media-url"
+    @Test("Rich notifications support a custom image URL key")
+    func customImageURLKey() throws {
+        let client = makeClient()
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .userInterface(
+                APNSUserNotification(
+                    alert: APNSAlert(title: "New photo"),
+                    imageURL: URL(string: "https://cdn.example.com/photo.jpg"),
+                    imageURLKey: "media-url"
+                )
+            )
         )
-        let data = try JSONEncoder().encode(payload)
+
+        let data = try client.payloadData(for: notification)
         let json = try jsonObject(data)
 
         #expect(json["image-url"] == nil)
         #expect(json["media-url"] as? String == "https://cdn.example.com/photo.jpg")
+    }
+
+    @Test("Empty custom payload encodes as an empty object")
+    func emptyPayloadEncoding() throws {
+        let data = try JSONEncoder().encode(APNSEmptyPayload())
+        let json = try jsonObject(data)
+        #expect(json.isEmpty)
     }
 }
 
@@ -192,42 +202,31 @@ struct APNSRichNotificationPayloadTests {
 @Suite("APNSNotification Defaults")
 struct APNSNotificationTests {
 
-    @Test("Default push type is alert")
-    func defaultPushType() {
-        let note = APNSNotification(deviceToken: "abc", payload: APNSPayload())
-        #expect(note.pushType == .alert)
-    }
-
-    @Test("Default priority is immediately")
-    func defaultPriority() {
-        let note = APNSNotification(deviceToken: "abc", payload: APNSPayload())
-        #expect(note.priority == .immediately)
-    }
-
     @Test("Optional fields default to nil")
     func optionalFieldsNil() {
-        let note = APNSNotification(deviceToken: "abc", payload: APNSPayload())
+        let note = APNSNotification(
+            deviceToken: "abc",
+            content: .background(APNSBackgroundNotification())
+        )
         #expect(note.expiration == nil)
         #expect(note.collapseID == nil)
         #expect(note.apnsID     == nil)
     }
 
-    @Test("Custom values are preserved")
+    @Test("Content and metadata values are preserved")
     func customValuesPreserved() {
         let expiry = Date(timeIntervalSinceNow: 3600)
         let id     = UUID()
         let note   = APNSNotification(
             deviceToken: "token123",
-            payload: APNSPayload(),
-            pushType: .background,
-            priority: .considerPower,
+            content: .userInterface(
+                APNSUserNotification(alert: APNSAlert(title: "Welcome"))
+            ),
             expiration: expiry,
             collapseID: "group-1",
             apnsID: id
         )
         #expect(note.deviceToken == "token123")
-        #expect(note.pushType    == .background)
-        #expect(note.priority    == .considerPower)
         #expect(note.expiration  == expiry)
         #expect(note.collapseID  == "group-1")
         #expect(note.apnsID      == id)
@@ -261,104 +260,124 @@ private func jsonObject(_ data: Data) throws -> [String: Any] {
 
 // MARK: - Background notification validation
 
-@Suite("Background Notification Validation")
-struct BackgroundNotificationValidationTests {
+@Suite("Notification Request Validation")
+struct NotificationRequestValidationTests {
 
-    @Test("Background push requires content-available")
-    func backgroundPushRequiresContentAvailable() async {
+    @Test("Background notifications derive background headers")
+    func backgroundHeaders() {
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .background(APNSBackgroundNotification())
+        )
+
+        #expect(notification.pushType == .background)
+        #expect(notification.priority == .considerPower)
+    }
+
+    @Test("User interface notifications derive alert headers")
+    func userInterfaceHeaders() {
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .userInterface(
+                APNSUserNotification(alert: APNSAlert(title: "Hello"), badge: 1)
+            )
+        )
+
+        #expect(notification.pushType == .alert)
+        #expect(notification.priority == .immediately)
+    }
+
+    @Test("Custom data must encode to a top-level object")
+    func customDataMustBeJSONObject() throws {
+        let client = makeClient()
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .background(APNSBackgroundNotification(customData: ["one", "two"]))
+        )
+
+        do {
+            _ = try client.payloadData(for: notification)
+            Issue.record("Expected invalid notification error")
+        } catch APNSError.invalidNotification(let message) {
+            #expect(message == "Custom data must encode to a top-level JSON object.")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Custom data must not override aps")
+    func customDataMustNotOverrideAPS() throws {
         let client = makeClient()
 
-        struct Payload: APNSNotificationPayload {
-            struct APS: Encodable {
-                let badge: Int
+        struct ConflictingData: Encodable, Sendable {
+            let aps: String
+        }
+
+        let notification = APNSNotification(
+            deviceToken: "abc123",
+            content: .background(APNSBackgroundNotification(customData: ConflictingData(aps: "bad")))
+        )
+
+        do {
+            _ = try client.payloadData(for: notification)
+            Issue.record("Expected invalid notification error")
+        } catch APNSError.invalidNotification(let message) {
+            #expect(message == "Custom data must not encode the reserved top-level key \"aps\".")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Custom data must not collide with the image URL key")
+    func customDataMustNotOverrideImageURLKey() throws {
+        let client = makeClient()
+
+        struct ConflictingData: Encodable, Sendable {
+            let mediaURL: String
+
+            enum CodingKeys: String, CodingKey {
+                case mediaURL = "media-url"
             }
-
-            let aps: APS
-            let deepLink: String
         }
 
         let notification = APNSNotification(
             deviceToken: "abc123",
-            payload: Payload(aps: .init(badge: 0), deepLink: "myapp://home"),
-            pushType: .background,
-            priority: .considerPower
+            content: .userInterface(
+                APNSUserNotification(
+                    alert: APNSAlert(title: "Hello"),
+                    imageURL: URL(string: "https://cdn.example.com/photo.jpg"),
+                    imageURLKey: "media-url",
+                    customData: ConflictingData(mediaURL: "existing")
+                )
+            )
         )
 
         do {
-            try await client.send(notification)
-            Issue.record("Expected invalid background notification error")
+            _ = try client.payloadData(for: notification)
+            Issue.record("Expected invalid notification error")
         } catch APNSError.invalidNotification(let message) {
-            #expect(message == "Background notifications must encode aps.content-available = 1.")
+            #expect(message == "Custom data already encodes the top-level key \"media-url\".")
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
     }
+}
 
-    @Test("Background push rejects alert payloads")
-    func backgroundPushRejectsAlertPayloads() async {
-        let client = makeClient()
-
-        let payload = APNSPayload(
-            alert: APNSAlert(title: "Welcome", body: "Tap to open"),
-            badge: 0,
-            contentAvailable: true
-        )
-
-        let notification = APNSNotification(
-            deviceToken: "abc123",
-            payload: payload,
-            pushType: .background,
-            priority: .considerPower
-        )
-
-        do {
-            try await client.send(notification)
-            Issue.record("Expected invalid background notification error")
-        } catch APNSError.invalidNotification(let message) {
-            #expect(message == "Background notifications must not include alert, sound, or badge in aps. Use pushType .alert for user-visible notifications.")
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
-    }
-
-    @Test("Background push requires priority 5")
-    func backgroundPushRequiresPriorityFive() async {
-        let client = makeClient()
-
-        let payload = APNSPayload(contentAvailable: true)
-        let notification = APNSNotification(
-            deviceToken: "abc123",
-            payload: payload,
-            pushType: .background,
-            priority: .immediately
-        )
-
-        do {
-            try await client.send(notification)
-            Issue.record("Expected invalid background notification error")
-        } catch APNSError.invalidNotification(let message) {
-            #expect(message == "Background notifications must use priority .considerPower (apns-priority: 5).")
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
-    }
-
-    private func makeClient() -> APNSClient {
-        let credentials = APNSCredentials(
-            keyID: "KEYID12345",
-            teamID: "TEAM12345",
-            privateKeyPEM: testPrivateKeyPEM
-        )
-        let configuration = APNSConfiguration(
-            credentials: credentials,
-            topic: "com.example.MyApp",
-            environment: .sandbox
-        )
-        let sessionConfig = URLSessionConfiguration.ephemeral
-        sessionConfig.protocolClasses = [UnexpectedNetworkURLProtocol.self]
-        let session = URLSession(configuration: sessionConfig)
-        return APNSClient(configuration: configuration, session: session)
-    }
+private func makeClient() -> APNSClient {
+    let credentials = APNSCredentials(
+        keyID: "KEYID12345",
+        teamID: "TEAM12345",
+        privateKeyPEM: testPrivateKeyPEM
+    )
+    let configuration = APNSConfiguration(
+        credentials: credentials,
+        topic: "com.example.MyApp",
+        environment: .sandbox
+    )
+    let sessionConfig = URLSessionConfiguration.ephemeral
+    sessionConfig.protocolClasses = [UnexpectedNetworkURLProtocol.self]
+    let session = URLSession(configuration: sessionConfig)
+    return APNSClient(configuration: configuration, session: session)
 }
 
 private final class UnexpectedNetworkURLProtocol: URLProtocol, @unchecked Sendable {

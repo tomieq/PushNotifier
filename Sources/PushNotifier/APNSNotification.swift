@@ -2,17 +2,12 @@ import Foundation
 
 /// A push notification request sent to APNs for a single device.
 ///
-/// Use the generic `Payload` parameter to send either the built-in
-/// ``APNSPayload`` or a custom type conforming to ``APNSNotificationPayload``.
-public struct APNSNotification<Payload: APNSNotificationPayload>: Sendable {
+/// Any custom JSON is provided through the chosen ``APNSNotificationContent``.
+public struct APNSNotification: Sendable {
     /// The hex-encoded device token received from the device.
     public let deviceToken: String
-    /// The notification payload to deliver.
-    public let payload: Payload
-    /// The push type. Defaults to `.alert`.
-    public let pushType: APNSPushType
-    /// The delivery priority. Defaults to `.immediately`.
-    public let priority: APNSPriority
+    /// The type of notification to send.
+    public let content: APNSNotificationContent
     /// The date after which the notification is no longer valid.
     /// If `nil`, APNs stores the notification for up to 30 days.
     public let expiration: Date?
@@ -24,19 +19,44 @@ public struct APNSNotification<Payload: APNSNotificationPayload>: Sendable {
 
     public init(
         deviceToken: String,
-        payload: Payload,
-        pushType: APNSPushType = .alert,
-        priority: APNSPriority = .immediately,
+        content: APNSNotificationContent,
         expiration: Date? = nil,
         collapseID: String? = nil,
         apnsID: UUID? = nil
     ) {
         self.deviceToken = deviceToken
-        self.payload = payload
-        self.pushType = pushType
-        self.priority = priority
+        self.content = content
         self.expiration = expiration
         self.collapseID = collapseID
         self.apnsID = apnsID
+    }
+}
+
+extension APNSNotification {
+    var pushType: APNSPushType {
+        switch content {
+        case .background:
+            .background
+        case .userInterface:
+            .alert
+        }
+    }
+
+    var priority: APNSPriority {
+        switch content {
+        case .background:
+            .considerPower
+        case .userInterface:
+            .immediately
+        }
+    }
+
+    var customData: APNSCustomData {
+        switch content {
+        case .background(let backgroundNotification):
+            backgroundNotification.customData
+        case .userInterface(let userNotification):
+            userNotification.customData
+        }
     }
 }
