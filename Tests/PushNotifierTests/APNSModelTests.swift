@@ -144,51 +144,6 @@ struct APNSNotificationPayloadEncodingTests {
         #expect(aps["thread-id"] as? String == "conversation-1")
     }
 
-    @Test("Rich notifications encode image URL and mutable-content")
-    func richNotificationEncoding() throws {
-        let client = makeClient()
-        let notification = APNSNotification(
-            deviceToken: "abc123",
-            content: .userInterface(
-                APNSUserNotification(
-                    alert: APNSAlert(title: "New photo", body: "Tap to view"),
-                    sound: .default,
-                    imageURL: URL(string: "https://cdn.example.com/photo.jpg")
-                )
-            )
-        )
-
-        let data = try client.payloadData(for: notification)
-        let json = try jsonObject(data)
-        let aps = try #require(json["aps"] as? [String: Any])
-
-        #expect((aps["alert"] as? [String: Any])?["title"] as? String == "New photo")
-        #expect(aps["mutable-content"] as? Int == 1)
-        #expect(aps["sound"] as? String == "default")
-        #expect(json["image-url"] as? String == "https://cdn.example.com/photo.jpg")
-    }
-
-    @Test("Rich notifications support a custom image URL key")
-    func customImageURLKey() throws {
-        let client = makeClient()
-        let notification = APNSNotification(
-            deviceToken: "abc123",
-            content: .userInterface(
-                APNSUserNotification(
-                    alert: APNSAlert(title: "New photo"),
-                    imageURL: URL(string: "https://cdn.example.com/photo.jpg"),
-                    imageURLKey: "media-url"
-                )
-            )
-        )
-
-        let data = try client.payloadData(for: notification)
-        let json = try jsonObject(data)
-
-        #expect(json["image-url"] == nil)
-        #expect(json["media-url"] as? String == "https://cdn.example.com/photo.jpg")
-    }
-
     @Test("Empty custom payload encodes as an empty object")
     func emptyPayloadEncoding() throws {
         let data = try JSONEncoder().encode(APNSEmptyPayload())
@@ -323,40 +278,6 @@ struct NotificationRequestValidationTests {
             Issue.record("Expected invalid notification error")
         } catch APNSError.invalidNotification(let message) {
             #expect(message == "Custom data must not encode the reserved top-level key \"aps\".")
-        } catch {
-            Issue.record("Unexpected error: \(error)")
-        }
-    }
-
-    @Test("Custom data must not collide with the image URL key")
-    func customDataMustNotOverrideImageURLKey() throws {
-        let client = makeClient()
-
-        struct ConflictingData: Encodable, Sendable {
-            let mediaURL: String
-
-            enum CodingKeys: String, CodingKey {
-                case mediaURL = "media-url"
-            }
-        }
-
-        let notification = APNSNotification(
-            deviceToken: "abc123",
-            content: .userInterface(
-                APNSUserNotification(
-                    alert: APNSAlert(title: "Hello"),
-                    imageURL: URL(string: "https://cdn.example.com/photo.jpg"),
-                    imageURLKey: "media-url",
-                    customData: ConflictingData(mediaURL: "existing")
-                )
-            )
-        )
-
-        do {
-            _ = try client.payloadData(for: notification)
-            Issue.record("Expected invalid notification error")
-        } catch APNSError.invalidNotification(let message) {
-            #expect(message == "Custom data already encodes the top-level key \"media-url\".")
         } catch {
             Issue.record("Unexpected error: \(error)")
         }

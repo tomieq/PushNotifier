@@ -183,6 +183,12 @@ APNs does not have a standard `aps.image` field. Image notifications on iPhone a
 `PushNotifier` handles that pattern through `APNSUserNotification`:
 
 ```swift
+struct ImageData: Codable {
+    let imagePath: String
+    enum CodingKeys: String, CodingKey {
+        case imageUrl = "image-url"
+    }
+}
 let notification = APNSNotification(
         deviceToken: deviceToken,
     content: .userInterface(
@@ -192,7 +198,8 @@ let notification = APNSNotification(
                 body: "Alice sent a picture"
             ),
             sound: .default,
-            imageURL: URL(string: "https://cdn.example.com/attachments/photo.jpg")!
+            mutableContent: true,
+            customData: ImageData(imageUrl: "https://cdn.example.com/attachments/photo.jpg"))!
         )
     )
 )

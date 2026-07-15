@@ -72,6 +72,7 @@ public final class APNSClient: Sendable {
 
         var request = try buildRequest(for: notification, bearerToken: token)
         request.httpBody = payloadData
+        print("Uploading \(String(data: payloadData, encoding: .utf8)!)")
 
         let (data, response): (Data, URLResponse)
         do {
@@ -204,7 +205,7 @@ public final class APNSClient: Sendable {
             if userNotification.contentAvailable == true {
                 aps["content-available"] = 1
             }
-            if userNotification.mutableContent || userNotification.imageURL != nil {
+            if userNotification.mutableContent {
                 aps["mutable-content"] = 1
             }
             if let category = userNotification.category {
@@ -212,22 +213,6 @@ public final class APNSClient: Sendable {
             }
             if let threadID = userNotification.threadID {
                 aps["thread-id"] = threadID
-            }
-            if let imageURL = userNotification.imageURL {
-                guard !userNotification.imageURLKey.isEmpty else {
-                    throw APNSError.invalidNotification("imageURLKey must not be empty.")
-                }
-                guard userNotification.imageURLKey != "aps" else {
-                    throw APNSError.invalidNotification(
-                        "imageURLKey must not use the reserved top-level key \"aps\"."
-                    )
-                }
-                guard payload[userNotification.imageURLKey] == nil else {
-                    throw APNSError.invalidNotification(
-                        "Custom data already encodes the top-level key \"\(userNotification.imageURLKey)\"."
-                    )
-                }
-                payload[userNotification.imageURLKey] = imageURL.absoluteString
             }
 
             payload["aps"] = aps

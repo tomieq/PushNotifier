@@ -13,8 +13,6 @@ public struct APNSUserNotification: Sendable {
     public let mutableContent: Bool
     public let category: String?
     public let threadID: String?
-    public let imageURL: URL?
-    public let imageURLKey: String
     public let customData: APNSCustomData
 
     public init(
@@ -25,8 +23,6 @@ public struct APNSUserNotification: Sendable {
         mutableContent: Bool = false,
         category: String? = nil,
         threadID: String? = nil,
-        imageURL: URL? = nil,
-        imageURLKey: String = "image-url"
     ) {
         self.init(
             alert: alert,
@@ -36,8 +32,6 @@ public struct APNSUserNotification: Sendable {
             mutableContent: mutableContent,
             category: category,
             threadID: threadID,
-            imageURL: imageURL,
-            imageURLKey: imageURLKey,
             customData: APNSCustomData.empty
         )
     }
@@ -50,8 +44,6 @@ public struct APNSUserNotification: Sendable {
         mutableContent: Bool = false,
         category: String? = nil,
         threadID: String? = nil,
-        imageURL: URL? = nil,
-        imageURLKey: String = "image-url",
         customData: CustomData
     ) {
         self.alert = alert
@@ -61,8 +53,6 @@ public struct APNSUserNotification: Sendable {
         self.mutableContent = mutableContent
         self.category = category
         self.threadID = threadID
-        self.imageURL = imageURL
-        self.imageURLKey = imageURLKey
         self.customData = APNSCustomData(customData)
     }
 }
